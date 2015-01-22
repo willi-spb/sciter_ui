@@ -1,2 +1,2 @@
 # scDelphiPack
-delphiXE-package for Sciter access
+delphi-XE-package for Sciter access
