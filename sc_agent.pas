@@ -2,7 +2,7 @@ unit sc_agent;
 
 interface
 
-uses  Windows, Types, System.SysUtils, Sciter, SciterTypes,
+uses  Windows, Types, System.SysUtils, Sciter, SciterTypes, Variants,// System.Generics.Collections,
      System.Classes, System.Zip;
 
 // тип загрузки ресурсов
@@ -45,6 +45,23 @@ type
    function toString:string;
   end;
 
+  TReadyDataRecord=record
+  public
+   cbhead_code: integer; //< [in] one of the codes above.
+   cbhead_hwnd: HWND; //< [in] HWINDOW of the window this callback was attached to.*/
+   uri:string;  //*< [in] fully qualified uri, for example \"http://server/folder/file.ext\".*/
+   outData: PBYTE;          //*< [in,out] pointer to loaded data to return. if data exists in the cache then this field contain pointer to it*/
+   outDataSize: integer;      //*< [in,out] loaded data size to return.*/
+   dataType: integer;         //*< [in] SciterResourceType */
+   requestId: Pointer;        //*< [in] request id that needs to be passed as is to the SciterDataReadyAsync call */
+   principal: HELEMENT;
+   initiator: HELEMENT;
+  end;
+
+
+  pReadyDataRecord=^TReadyDataRecord;
+
+
   TErrorEvent= procedure(const aErrPlace:TErrorPlace) of object;
 
 ////
@@ -60,11 +77,14 @@ type
                                      aEventPtr:pointer;
                                      var HRes:boolean) of object;
 ///
+///  для скрипта
+ TscScryptHandlerEvent=procedure(const aName:string; aData:Variant; var HRes:boolean) of Object;
 ///
  TscAgent=class(TObject)  // Singleton
    protected
     fHwnd:Hwnd;
     FFileName:String;
+    FVisible:boolean;
     fEvents: TElementsEvents; /// массив events
     fLastResult:SCDOM_RESULT; // результат функции скайтера
     fParent: HWND;
@@ -82,6 +102,7 @@ type
     fZipStream: TMemoryStream;
     fZipFile: TZipFile;
     ///
+    procedure SetVisible(value:boolean);
     ///  propertyes
     function getInitialWindowState: TSciterWindowState;
     ///
@@ -89,6 +110,9 @@ type
     procedure el_failure(const APlace,atext:string; aUid:cardinal);
     // сформировать ошибку и обработать её - используется для показа Исключений
     procedure ConcatErrorData(aEE:Exception;  const adata:string=''; aLine:integer=0);
+    ///
+    ///  обработка команд - исп. в el_Proc
+    function handle_scripting_call_E(he: HELEMENT; prms: PSCRIPTING_METHOD_PARAMS):boolean;
     ///
     ///  callback
     function el_Proc(tag: LPVOID; he: HELEMENT; evtg: UINT; prms: LPVOID): BOOL; stdcall;
@@ -99,15 +123,31 @@ type
     Caption:string;
     // CB:
         el_HandlerEvent:TscElementHandlerEvent; //  event
-   ///
+        ScryptHandlerEvent:TscScryptHandlerEvent;
    ///
    ///
    ///  AllSection
    function GetClassName:string;
    function GetVersion(major:boolean):integer;
+   function DataReady(const Ur:string; data: Pointer; dataLength: integer):integer;
+   function DataReadyAsync(adataType:integer; const Ur:string; data: pointer; dataLength: integer; reqId: pReadyDataRecord=nil): integer;
+   // загрузить из потока   type: ->  SciterResourceType
+   function LoadDataFromStream(aDataType:integer; const AStream:TStream; const aURl:string; aUrlFormatSign:integer=0):boolean;
+   // analog absolute
+   function LoadDataFromMemStream(aDataType:integer; const AMStream:TMemoryStream; const aURl:string; aUrlFormatSign:integer=0):boolean;
+   ///
+   ///  загрузить из ресурсов - идентификатор ресурса - это имя файла (без расширения) - тип ресурса - это расширение файла
+   function LoadDataFromRes(aDataType:integer; const aURl:string; aUrlFormatSign:integer=0):boolean;
+   ///  аналог - список ресурсов
+   function LoadDataFromResources(aDataType:integer; const Astr:array of string; aUrlFormatSign:integer=0):boolean;
+   ///
    ///
    function LoadFile(const aFilename:string):boolean;
    function LoadHtml(aBytes:PByte; bSize:integer; const baseUrl:string):boolean;
+   function LoadHtmlFromRes(const aURl:string):boolean;
+   ///
+   ///  установка общего callback  0 - nil   1 - по умолчанию на процедуру модуля Sciter > BasicHostCallback
+   function SetCallbackRegime(aCBRegime:integer):boolean;
    ///
    function SetMediaType(const mediaType:String):boolean;
    function SetMediaVars(const mediaVars: PSCITER_VALUE):boolean;
@@ -267,6 +307,7 @@ type
     ///
     property Filename:string read FFilename;
     property InitialWindowState: TSciterWindowState read getInitialWindowState;
+    property Visible:boolean read FVisible write SetVisible;
     // зип файл инициализирован. можно использовать для модификации скина
     // перед его загрузкой скайтером
     property OnZipFileLoad: TNotifyEvent read fOnZipFileLoad write fOnZipFileLoad;
@@ -283,10 +324,30 @@ type
 
  var scAgent:TscAgent=nil;
 
+ /////////////////////////////////
+ ///
+ ///  обработка строки перед её отправкой в скайтер -- замены " на   \"  и пр.
+ function prepareStringToValue(const AStr: string): string;
+
 implementation
 
  uses  Winapi.Messages,
        Vcl.Dialogs;
+
+
+function prepareStringToValue(const AStr: string): string;
+var
+  LS: string;
+begin
+  // Внимание - важен порядок вызова заменителей
+  // \ to \\
+  LS:=StringReplace(AStr, '\', '\\', [rfReplaceAll]);
+  // " to \"
+  LS:=StringReplace(LS, '"', '\"', [rfReplaceAll]);
+  // ' to \'
+  LS:=StringReplace(LS, '''', '\''',[rfReplaceAll]);
+  Result:=LS;
+end;
 
 
  procedure TErrorPlace.SetNull;
@@ -323,11 +384,180 @@ function TscAgent.GetVersion(major:boolean):integer;
     except Result:=-1;
    end;
  end;
+
+
+function TscAgent.DataReady(const Ur:string; data: Pointer; dataLength: integer):integer;
+var LFlag:bool;
+ begin
+   Result:=-1;
+   try
+     LFlag:=ISciter.SciterDataReady(fhwnd,Pchar(Ur),data,Uint(dataLength));
+     if LFlag=true then
+        Result:=0;
+    except Result:=-10;
+   end;
+ end;
+
+function TscAgent.DataReadyAsync(adataType:integer; const Ur:string; data: pointer; dataLength: integer; reqId:pReadyDataRecord=nil): integer;
+ var LFlag:bool;
+     LSCN:SCN_LOAD_DATA;
+     pLSCN:PSCN_LOAD_DATA;
+     L_reqId:pReadyDataRecord;
+     L_record:TReadyDataRecord;
+     LL:integer;
+ begin
+   Result:=-1;
+   if reqId<>nil then
+        L_reqId:=reqId
+   else L_reqId:=@L_record;
+   L_reqId^.cbhead_code:=0;
+   L_reqId^.cbhead_hwnd:=0;
+   L_reqId^.uri:='';
+   L_reqId^.outData:=nil;
+   L_reqId^.outDataSize:=0;
+   L_reqId^.dataType:=adataType;
+   L_reqId^.principal.pval:=nil;
+   L_reqId^.initiator.pval:=nil;
+   LSCN.cbhead.code:=0;
+   LSCN.cbhead.hwnd:=fHwnd;
+   LSCN.uri:=Pchar(Ur);
+   LL:=Length(Ur);
+   LSCN.outData:=data;
+   LSCN.outDataSize:=dataLength;
+   if L_reqId^.dataType<0 then LSCN.dataType:=0 //  see ->> SciterResourceType
+   else LSCN.dataType:=L_reqId^.dataType;
+   LSCN.requestId:=nil;
+   LSCN.principal.pval:=nil;
+   LSCN.principal.pval:=nil;
+   pLSCN:=@LSCN;
+   try
+     LFlag:=ISciter.SciterDataReadyAsync(fhwnd,Pchar(Ur),data,Uint(dataLength),pLSCN);
+     if LFlag=true then
+      begin
+        Result:=0;
+        L_reqId^.cbhead_code:=pLSCN^.cbhead.code;
+        L_reqId^.cbhead_hwnd:=pLSCN^.cbhead.hwnd;
+        L_reqId^.uri:=WideCharLenToString(PwideChar(pLSCN^.uri),LL);
+        L_reqId^.outData:=pLSCN^.outdata;
+        L_reqId^.outDataSize:=pLSCN^.outDataSize;
+        L_reqId^.dataType:=pLSCN^.dataType;
+        L_reqId^.principal:=pLSCN^.principal;
+        L_reqId^.initiator:=pLSCN^.initiator;
+      end;
+    except Result:=-10;
+   end;
+ end;
+
+ function TscAgent.LoadDataFromStream(aDataType:integer; const AStream:TStream; const aURl:string; aUrlFormatSign:integer=0):boolean;
+ var il:integer;
+      LB: TBytes;
+      LS:string;
+  begin
+   Result:=false;
+   LS:=aUrl;
+   case  aUrlFormatSign of
+    1: LS:=Concat('file://',LS);
+   end;
+   AStream.Seek(0,0);
+   SetLength(LB, AStream.Size);
+   AStream.Read(Pointer(LB)^, AStream.Size);
+   il:=DataReadyAsync(aDataType,LS,Pointer(LB),Integer( AStream.Size));
+   SetLength(LB,0);
+   Result:=(il=0);
+  end;
+
+function TscAgent.LoadDataFromMemStream(aDataType:integer; const AMStream:TMemoryStream; const aURl:string;  aUrlFormatSign:integer=0):boolean;
+var il:integer;
+    LS:string;
+ begin
+    Result:=false;
+    LS:=aUrl;
+    case  aUrlFormatSign of
+     1: LS:=Concat('file://',LS);
+    end;
+   AMStream.Seek(0,0);
+   il:=DataReadyAsync(aDataType,LS,AMStream.Memory,Integer(AMStream.Size));
+   Result:=(il=0);
+ end;
+
+ function _ExtractFilename(const aUrl:String):string;
+ var LS:String;
+     i:integer;
+  begin
+    LS:=ExtractFileName(aUrl);
+    Result:='';
+    i:=Length(LS);
+    while i>0 do
+     begin
+       if (LS[i]<>'/') and (LS[i]<>'\') then Result:=Concat(LS[i],Result)
+       else break;
+       Dec(i);
+     end;
+  end;
+
+function TscAgent.LoadDataFromRes(aDataType:integer; const aURl:string; aUrlFormatSign:integer=0):boolean;
+var  LresExt,Lresname:string;
+     HResInfo: THandle;
+     MemHandle: THandle;
+    // Stream: TMemoryStream;
+     ResPtr: PByte;
+     ResSize: Longint;
+     LS:string;
+     il:integer;
+ begin
+     Result:=false;
+     case aUrlFormatSign of
+      1: LS:=Concat('file://',aUrl);
+      else LS:=aUrl
+     end;
+     LresExt:=ExtractFileExt(aUrl);
+     if LresExt[1]='.' then LResExt:=Copy(LresExt,2,Length(LresExt)-1);
+     Lresname:=ChangeFileExt(_ExtractFileName(aUrl),'');
+     HResInfo := FindResource(HInstance,Pchar(Lresname),Pchar(LresExt));
+     if HResInfo =0 then
+      begin
+          MessageDlg('Error name:"'+Lresname+'" type:'+LresExt,mtError,[mbOk],0);
+         // RaiseLastOSError;
+          exit;
+      end
+     else begin
+      // ShowMessage(LS);
+     end;
+     MemHandle := LoadResource(HInstance, HResInfo);
+     ResPtr := LockResource(MemHandle);
+     ResSize := SizeofResource(HInstance, HResInfo);
+     il:=DataReadyAsync(aDataType,LS,ResPtr,ResSize);
+    ///// il:=DataReady(LS,ResPtr,ResSize);
+     Result:=(il=0);
+ end;
+
+function TscAgent.LoadDataFromResources(aDataType:integer; const Astr:array of string; aUrlFormatSign:integer=0):boolean;
+var i:integer;
+   // LS:String;
+ begin
+ //  LS:='';
+   Result:=true;
+   i:=Low(Astr);
+   while i<=High(Astr) do
+    begin
+      if LoadDataFromRes(aDataType,Astr[i],aUrlFormatSign)=false then
+       begin
+         Result:=false;
+         break; // !~~
+       end;
+     // else begin
+     //   if LS='' then LS:=LS:=Concat(LS,
+     // end;
+      Inc(i);
+    end;
+ end;
+
 ///
 function TscAgent.LoadFile(const aFilename:string):boolean;
  begin
    Result:=ISciter.SciterLoadFile(fHwnd,Pchar(aFilename));
  end;
+
 function TscAgent.LoadHtml(aBytes:PByte; bSize:integer; const baseUrl:string):boolean;
 var LP:Pointer;
     i:Uint;
@@ -336,6 +566,48 @@ var LP:Pointer;
   i:=bSize;
   Result:=ISciter.SciterLoadHtml(fHwnd,LP,i,Pchar(BaseUrl));
  end;
+
+function TscAgent.LoadHtmlFromRes(const aURl:string):boolean;
+var  LresExt,Lresname:string;
+     HResInfo: THandle;
+     MemHandle: THandle;
+    // Stream: TMemoryStream;
+     ResPtr: PByte;
+     ResSize: Longint;
+     LS:string;
+     il:integer;
+ begin
+     Result:=false;
+     LS:=_ExtractFileName(aUrl);
+     LresExt:=ExtractFileExt(LS);
+     if LresExt[1]='.' then LResExt:=Copy(LresExt,2,Length(LresExt)-1);
+     Lresname:=ChangeFileExt(LS,'');
+     HResInfo := FindResource(HInstance,Pchar(Lresname),Pchar(LresExt));
+     if HResInfo =0 then
+      begin
+          RaiseLastOSError;
+          exit;
+      end;
+     MemHandle := LoadResource(HInstance, HResInfo);
+     ResPtr := LockResource(MemHandle);
+     ResSize := SizeofResource(HInstance, HResInfo);
+     Result:=ISciter.SciterLoadHtml(fHwnd,ResPtr,ResSize,Pchar(aUrl));
+     Result:=(il=0);
+ end;
+
+function TscAgent.SetCallbackRegime(aCBRegime:integer):boolean;
+ begin
+   Result:=true;
+   case aCBRegime of
+   0: ISciter.SciterSetCallback(fHwnd,nil,nil);
+   1: begin
+       SetBHProtocol(1);
+       ISciter.SciterSetCallback(fHwnd,@BasicHostCallback,nil);
+      end;
+   else Result:=false;
+   end;
+ end;
+
 
 function TscAgent.SetMediaType(const mediaType:String):boolean;
  begin
@@ -398,6 +670,20 @@ function TscAgent.SetHomeURL(const aURL:string):boolean;
 /////////////////////////////////////////////////////////////////////////////////////////////
 ///
 ///   Properties metods
+ procedure TscAgent.SetVisible(value:boolean);
+  begin
+    if Value<>FVisible then
+     begin
+       if value=false then
+        begin
+
+        end
+       else begin
+         Show();
+       end;
+     end;
+  end;
+
 function  TscAgent.getInitialWindowState:TSciterWindowState;
  begin
     Result:=self.fInitialWindowState;
@@ -440,6 +726,58 @@ var LR:integer;
           MessageDlg(LER.toString,mtError,[mbOk],0);
    end;
 
+function TscAgent.handle_scripting_call_E(he: HELEMENT; prms: PSCRIPTING_METHOD_PARAMS): boolean;
+var
+  i:integer;
+  a: PSCITER_VALUE;
+  Mas:Variant;
+  LS:string;
+  LR:boolean;
+  Ld:double;
+begin
+  Result:=false;
+   if assigned(ScryptHandlerEvent)=false then exit;
+  if prms.argc>0 then begin
+    LS:=StrPas(prms.name);
+    Mas:=VarArrayCreate([0, prms.argc], varVariant);
+    Mas[0]:= VarArrayHighBound(Mas, 1);
+    LR:=true;
+    for i:=0 to prms.argc-1 do begin
+      try
+        a:= PSCITER_VALUE(Cardinal(prms.argv)+(i * SizeOf(SCITER_VALUE)));
+        case a^.t of
+          0: ; //undefined
+          1: ; //null
+          2: begin //bool
+               Mas[i+1] := boolean(a^.d = 1);
+             end;
+          3: begin //integer
+               Mas[i+1] := integer(a^.d);
+             end;
+          4: begin
+               //float
+               Ld:=PDouble(@a^.d)^;
+               Mas[i+1]:=LD;
+             end;
+          5: begin   //string;
+               Mas[i+1] := string(PChar(Pointer(DWORD(a^.d+8))));
+             end;
+         end;
+        ///
+        ///
+      except LR:=false;
+      end;
+    end;
+       if (LR=true) and (assigned(ScryptHandlerEvent)) then
+         begin
+           LR:=false;
+           ScryptHandlerEvent(LS,Mas,LR);
+           // prms.result:=nil;
+           Result:=LR;
+         end;
+     VarClear(Mas);
+  end;
+end;
 
 function TscAgent.el_Proc(tag: LPVOID; he: HELEMENT; evtg: UINT; prms: LPVOID): BOOL;
 var
@@ -456,7 +794,12 @@ begin
             LRes:=false;
           //  fEvents.FindEvent(he,)
             L_EventType:=sc_ConvertHandleToEvent(evtg,prms);
-            el_HandlerEvent(tag,he.pval,he.toUID,evtg,prms,L_EventType,fEvents.FindEvent(he,L_EventType),Lres); // !!
+            if L_EventType=eOnScrypt then
+             begin
+               result:=handle_scripting_call_E(he,PSCRIPTING_METHOD_PARAMS(prms));
+             end
+            else
+              el_HandlerEvent(tag,he.pval,he.toUID,evtg,prms,L_EventType,fEvents.FindEvent(he,L_EventType),Lres); // !!
             if LRes=true then exit;
             ///
           //  Result:=true;
@@ -497,7 +840,8 @@ begin
 
           HANDLE_SCRIPTING_METHOD_CALL:
           begin
-            result:=True;//handle_scripting_call(he,PSCRIPTING_METHOD_PARAMS(prms));
+            result:=True;//
+           // result:=handle_scripting_call(he,PSCRIPTING_METHOD_PARAMS(prms));
            end;
 
           HANDLE_TISCRIPT_METHOD_CALL: ;
@@ -514,13 +858,22 @@ begin
          PostQuitMessage(0);
        end;
        if Msg = WM_DESTROY then  PostQuitMessage(0);
-      try
-       hndld:=Assigned(fOnMessages) and fOnMessages(hwnd,Msg,wParam,lParam,Result);
-       if not hndld then  result:= ISciter.SciterProcND( hWnd,Msg,wParam, lParam, hndld);
-       if not hndld then  result:= DefWindowProc(hWnd, msg, wParam, lParam);
-      except
+      if (fHwnd=0) or (fHwnd=hwnd) then
+       try
+        if (fHwnd=0) then fHwnd:=hwnd;
+
+        hndld:=Assigned(fOnMessages) and fOnMessages(hwnd,Msg,wParam,lParam,Result);
+        if not hndld then
+           result:= ISciter.SciterProcND( hWnd,Msg,wParam, lParam, hndld);
+        if not hndld then
+            result:= DefWindowProc(hWnd, msg, wParam, lParam);
+        except
         //errors handling
-      end;
+      end
+     else if (hwnd<>0) then
+            begin
+             //  result:= DefWindowProc(hWnd, msg, wParam, lParam);
+            end;
 end;
 
 ////////////////////////////////////////////////////////////   public 1
@@ -1395,6 +1748,7 @@ function TscAgent.el_GetIDName(he: HELEMENT):string;
 constructor TscAgent.Create(const aname, aCaption: string);
 begin
   el_HandlerEvent:=nil;
+  ScryptHandlerEvent:=nil;
   Self.Name:=Trim(aName);
   Self.Caption:=aCaption;
   inherited Create;
@@ -1402,6 +1756,8 @@ begin
   GroupNum:=-1;
   FonFailureEvent:=nil;
   fhwnd:=0;
+  ///
+  ///scryptDistionary:=TDictionary<string,Variant>.Create;
  end;
 
 destructor TscAgent.Destroy;
@@ -1485,7 +1841,8 @@ begin
     WindowClass.lpszMenuName := nil;
     WindowClass.lpszClassName := PChar('TSciterWindow');
   	WindowClass.hIconSm		:= LoadIcon(hInstance, 'MAINICON');
-    if RegisterClassEx(WindowClass) = 0 then  Halt;
+    if RegisterClassEx(WindowClass) = 0 then
+       Halt;
   end;
   style:=0;
   exstyle:=0;
@@ -1545,7 +1902,8 @@ begin
    if GetMessage(rMsg, 0, 0, 0) then begin
       try
         if TranslateAccelerator(rMsg.hwnd, hAccelTable, rMsg)=0 then begin
-          if not ISciter.SciterTranslateMessage(rMsg) then  TranslateMessage(rmsg);
+          if not ISciter.SciterTranslateMessage(rMsg) then
+                TranslateMessage(rmsg);
           DispatchMessage(rMsg);
         end;
       except
@@ -1567,6 +1925,7 @@ begin
      end;
     end;
  ISciter.SciterUpdateWindow(fhwnd);
+ FVisible:=true;
  Result:=true;
  //
 end;
@@ -1644,7 +2003,7 @@ var L_pcmd:Cardinal;
                     end;
         HANDLE_BEHAVIOR_EVENT: Result:=eOnBehavior;
         // HANDLE_METHOD_CALL,HANDLE_DATA_ARRIVED,
-        HANDLE_SCRIPTING_METHOD_CALL: Result:=eOnOther;
+        HANDLE_SCRIPTING_METHOD_CALL: Result:=eOnScrypt;
         HANDLE_TISCRIPT_METHOD_CALL:
          begin
            Result:=eOnOther;

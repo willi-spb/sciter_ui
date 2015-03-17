@@ -14,6 +14,7 @@ type
                                        ascEvent:TSCITER_EVENTS;
                                        aEventPtr:pointer; var HRes:boolean); virtual;
   ///
+    procedure ScryptEvent(const aName:string; aData:Variant; var HRes:boolean);
  end;
 
 implementation
@@ -143,5 +144,9 @@ implementation
    end; // case
   end;
 
+  procedure TscHandler.ScryptEvent(const aName:string; aData:Variant; var HRes:boolean);
+   begin
+
+   end;
 
 end.
