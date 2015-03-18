@@ -12,6 +12,25 @@ var pLogEnabled=true; //    флаг позволяет отключать ло�
 
 // if( !sock ) return;
 
+//////////////////////  пример использования:
+/* в самом начале tscrypt добавить 
+ include "..w_pLog.js";    
+ w_activatepLog(0);  
+ w_clearpLog();
+  
+  - подключение скрипта раньше(!) остальных  - чтобы в других модулях проекта можно было вызывать команды логирования: напр. w_pLogStr("test"); и т.д.
+  - активация логирования 
+  - очистка пред данных по логированию
+  
+ далее - в коде допускается различных команд - см. ниже 
+ например вывод переменной типа массив w_pLogA(LLL);
+ 
+ для просмотра используйте например утилиту  sc_Logger.exe в папке проета /sciter-delphi
+ утилита должна быть запущена 1 раз и ранее, чем запускается проект.
+ */
+  
+  
+  // активация логирования
 function w_activatepLog(attt)
 {
   try
@@ -40,6 +59,7 @@ function w_closepLog()
 { pLogStream.println("CLOSE"); pLogStream.close; }
  
 
+// логирование строки
 function w_pLogStr(aVal)
 {
  if (pLogEnabled==false || pLogStream==null) { return false; };
@@ -47,6 +67,7 @@ function w_pLogStr(aVal)
  else {view.msgbox(#information,"ss-null");}
 }
 
+// логирование любой переменной
 function w_pLog(aVal,aComment="")
 { var Ls="";
  if (pLogEnabled==false || pLogStream==null) { return false; };
@@ -63,6 +84,7 @@ function w_pLog(aVal,aComment="")
  else {view.msgbox(#information,"obj ss-null");}
 }
 
+// логирование строки в файле скрипта - исп. __trace__
 function w_pTrace(aComment="")
 { if (pLogEnabled==false || pLogStream==null) { return false; };
   if (aComment!="") {pLogStream.println(aComment); }
@@ -73,6 +95,7 @@ function w_pTrace(aComment="")
   if (pLogStream.println("LINE="+L_line.toString()+" FUNC="+fnme+" (file="+L_file+")")==true) {return true;}
 }
 
+// логирование массива
 function w_pLogA(avR)
 { if (pLogEnabled==false || pLogStream==null) { return false; };
   var LRes=""; var Ls="";
@@ -92,5 +115,6 @@ function w_pLogA(avR)
   if (pLogStream.println(LRes)==true) {return true;}  
 }
 
+// очистка для лога - отправка спец команды :CLEAR
 function w_clearpLog() 
  { if (pLogStream==null) { return false; };  if (pLogStream.println(":CLEAR")==true) {return true;} }
