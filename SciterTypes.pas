@@ -111,6 +111,7 @@ TSCITER_EVENTS = (
   eOnSizeChanged,
   //other
   eOnBehavior,// (component-specific events)
+  eOnScrypt,
   eOnOther    //  willi -> b.s. none param
 );
 

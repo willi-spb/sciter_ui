@@ -1,17 +1,20 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <BorlandProject>
 	<Transactions>
+    <Transaction>1899.12.30 00:00:00.000.375,=W:\Willi\WXE5\Common\sciter_ui\SciterTypes.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.624,W:\Willi\WXE5\Common\sciter_ui\comp\scPack1.dproj=C:\Users\Admim\Documents\RAD Studio\Projects\Package1.dproj</Transaction>
     <Transaction>1899.12.30 00:00:00.000.126,=vcl.dcp</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.402,=W:\Willi\WXE5\Common\sciter_ui\sc_handler.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.586,=W:\Willi\WXE5\Common\sciter_ui\Sciter.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.137,W:\Willi\WXE5\Common\sciter_ui\Sciter.pas=</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.354,=W:\Willi\WXE5\Common\sciter_ui\Sciter.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.797,W:\Willi\WXE5\Common\sciter_ui\SciterClass.pas=</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.957,=rtl.dcp</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.214,=rtl.dcp</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.830,=W:\Willi\WXE5\Common\sciter_ui\comp\scComp.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.185,=rtl.dcp</Transaction>
     <Transaction>1899.12.30 00:00:00.000.364,=W:\Willi\WXE5\Common\sciter_ui\SciterClass.pas</Transaction>
     <Transaction>1899.12.30 00:00:00.000.392,=W:\Willi\WXE5\Common\sciter_ui\sc_agent.pas</Transaction>
-    <Transaction>1899.12.30 00:00:00.000.624,C:\Users\Admim\Documents\RAD Studio\Projects\Package1.dproj=W:\Willi\WXE5\Common\sciter_ui\comp\scPack1.dproj</Transaction>
-    <Transaction>1899.12.30 00:00:00.000.402,=W:\Willi\WXE5\Common\sciter_ui\sc_handler.pas</Transaction>
-    <Transaction>1899.12.30 00:00:00.000.375,=W:\Willi\WXE5\Common\sciter_ui\SciterTypes.pas</Transaction>
-    <Transaction>1899.12.30 00:00:00.000.957,=rtl.dcp</Transaction>
-    <Transaction>1899.12.30 00:00:00.000.830,=W:\Willi\WXE5\Common\sciter_ui\comp\scComp.pas</Transaction>
-    <Transaction>1899.12.30 00:00:00.000.354,=W:\Willi\WXE5\Common\sciter_ui\Sciter.pas</Transaction>
-    <Transaction>1899.12.30 00:00:00.000.214,=rtl.dcp</Transaction>
-    <Transaction>1899.12.30 00:00:00.000.185,=rtl.dcp</Transaction>
     <Transaction>1899.12.30 00:00:00.000.285,=rtl.dcp</Transaction>
   </Transactions>
 </BorlandProject>

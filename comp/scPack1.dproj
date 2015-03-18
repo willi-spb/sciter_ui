@@ -127,9 +127,8 @@
         <DCCReference Include="scComp.pas"/>
         <DCCReference Include="..\sc_agent.pas"/>
         <DCCReference Include="..\sc_handler.pas"/>
-        <DCCReference Include="..\Sciter.pas"/>
-        <DCCReference Include="..\SciterClass.pas"/>
         <DCCReference Include="..\SciterTypes.pas"/>
+        <DCCReference Include="..\Sciter.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>

@@ -104,6 +104,7 @@ type
      property OnTimerComplete:TNotifyEvent read FOnTimerComplete write FOnTimerComplete;
      property OnEnter:TNotifyEvent read FOnEnter write FOnEnter;
      property OnExit:TNotifyEvent read FOnExit write FOnExit;
+
  end;
 
  TscElementItemClass = class of TscElementItem;
@@ -128,6 +129,7 @@ type
   private
     { Private declarations }
     FElements: TscElemCollection;
+    FonScryptReceive:TscScryptHandlerEvent;
      function GetElemID(const aName:string):TscElementItem;
     // procedure SetElemID(const aName:string; Value:TscElementItem);
   protected
@@ -136,11 +138,13 @@ type
     { Public declarations }
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
+    function SetScryptHandler(aAgent:TscAgent):boolean; virtual;
     function InitElements(aAgent:TscAgent):boolean; virtual;
      property ElementByID[const aName: string]:TscElementItem read GetElemID;
   published
     { Published declarations }
      property Elements: TscElemCollection read FElements write FElements;
+     property OnScryptReceive:TscScryptHandlerEvent read FonScryptReceive write FonScryptReceive;
   end;
 
 procedure Register;
@@ -476,9 +480,20 @@ function TscElementItem.SetHomeState(aSetRg:integer=1):boolean;
     inherited Destroy;
   end;
 
+ function TscComp.SetScryptHandler(aAgent:TscAgent):boolean;
+  begin
+     if Assigned(FonScryptReceive) then
+        aAgent.ScryptHandlerEvent:=FonScryptReceive;
+     Result:=true;
+    // Result:=FElements.AssignToAgent(aAgent);
+  end;
+
  function TscComp.InitElements(aAgent:TscAgent):boolean;
  var i:integer;
    begin
+     if Assigned(FonScryptReceive) then
+        aAgent.ScryptHandlerEvent:=FonScryptReceive;
+     ///
      Result:=FElements.AssignToAgent(aAgent);
      if Result=false then exit;
      i:=0;

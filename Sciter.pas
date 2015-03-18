@@ -69,6 +69,15 @@ LPCSTR_RECEIVER = procedure( str: LPCSTR; str_length: UINT; param: LPVOID); stdc
 //////////////////////////////////////////////////////////////////////////
 ///
 ///  W
+SciterResourceType=(
+ RT_DATA_HTML = 0,
+ RT_DATA_IMAGE = 1,
+ RT_DATA_STYLE = 2,
+ RT_DATA_CURSOR = 3,
+ RT_DATA_SCRIPT = 4,
+ RT_DATA_RAW = 5);
+
+///
 ///
 TELEMENT_STATESREC=record
   const
@@ -388,7 +397,12 @@ ISciterAPI =  record
 
   Sciter_sv2V: function(vm: pointer{HVM };  script_value: pointer{tiscript_value}; var value: sc_VALUE; isolate: BOOL ): BOOL; stdcall;
   Sciter_V2sv: function(vm: pointer{HVM }; const value: sc_VALUE; var script_value: pointer{tiscript_value}): BOOL; stdcall;
-
+  SciterOpenArchive: function( const pval: sc_VALUE): BOOL; stdcall;
+  SciterGetArchiveItem: function( const pval: sc_VALUE): BOOL; stdcall;
+  SciterCloseArchive:function( const pval: sc_VALUE): BOOL; stdcall;
+  SciterFireEvent: function(var evt: BEHAVIOR_EVENT_PARAMS; post: BOOL; var handled: BOOL): SCDOM_RESULT; stdcall;
+  SciterGetCallbackParam: function( const pval: sc_VALUE): BOOL; stdcall;
+  SciterPostCallback: function( const pval: sc_VALUE): BOOL; stdcall;
 end;
 
 
@@ -456,20 +470,36 @@ var
     ISciter: PSciterAPI;
     function BasicHostCallback(pns: Pointer; callbackParam: Pointer): UINT; stdcall;
     function MethodToProcedure(self: TObject; methodAddr: pointer; maxParamCount: integer = 8) : pointer;
-    function GetResourceAsPointer(ResName: pchar; ResType: pchar; out Size: longword): pointer;
+ //   function GetResourceAsPointer(ResName: pchar; ResType: pchar; out Size: longword): pointer;
 
     function fOneElementCallback( he: HELEMENT; param: LPVOID  ): BOOL; stdcall;
     function fAllElementCallback( he: HELEMENT; param: LPVOID  ): BOOL; stdcall;
 
     function SciterInit: PSciterAPI;
     ///
+    procedure SetBHProtocol(aRegime:integer);
+
+    var err_loadInformRegime:integer=1; // 0 - не информируем об отсутствии файлов при загрузке OnLoad
+    ///
 implementation
+
+uses Dialogs;
 
 var
     hlib : HMODULE=0;
     SciterAPI: function():Pointer; stdcall;
     protocol: WideString = 'app:';
 
+
+ procedure SetBHProtocol(aRegime:integer);
+  begin
+   case aRegime of
+    1:  protocol:='file';
+   end;
+  end;
+
+
+    { Default OnLoaddata
 function OnLoadData (pns: PSCN_LOAD_DATA): UINT;
 var
   url, ps: WideString;
@@ -505,6 +535,204 @@ begin
 
     result := LOAD_OK; // proceed with the default loader.
 end;
+}
+
+function GetResourceAsPointer(ResName: pchar; ResType: pchar;
+  out Size: longword): Pointer;
+var
+  InfoBlock: HRSRC;
+  GlobalMemoryBlock: HGLOBAL;
+begin
+  result:=nil;
+  InfoBlock := FindResource(hInstance, ResName, ResType);
+  if InfoBlock = 0 then
+    raise Exception.Create(SysErrorMessage(GetLastError));
+  Size := SizeofResource(hInstance, InfoBlock);
+  if Size = 0 then
+    raise Exception.Create(SysErrorMessage(GetLastError));
+  GlobalMemoryBlock := LoadResource(hInstance, InfoBlock);
+  if GlobalMemoryBlock = 0 then
+    raise Exception.Create(SysErrorMessage(GetLastError));
+  result := LockResource(GlobalMemoryBlock);
+  if result = nil then
+    raise Exception.Create(SysErrorMessage(GetLastError));
+end;
+//
+{const
+  RT_HTML = MAKEINTRESOURCE(23);
+  LOAD_OK = 0;
+  LOAD_DISCARD = 1; // discard request completely
+  LOAD_DELAYED = 2; // data will be delivered later by the host
+ }
+
+  /// строковая   из   "../../sc_Res/scb_Funcs.js"
+  /// достает только имя файла и его расширение без точки в ниж. регистре: "scb_Funcs"  "js"
+  /// Внимание! не работает с извлечением файла из его пути - только с ../  или с протоколом  axxx:..//
+function w_ExtractResName(const aURL: widestring;
+  var aResName, aExt: widestring; const aExtmask: string = '*.*'): boolean;
+var
+  il: Integer;
+  L_Url, LwS, LwRes, Lext: widestring;
+begin
+  result := false;
+  LwS := '';
+  LwRes := '';
+  L_Url := aURL;
+  /// выделим имя без протокола - протокол заканчивается ":"
+  il := Low(aURL);
+  while il <= Length(aURL) do
+  begin
+    if (aURL[il] = ':') and (il < Length(aURL)) then
+    begin
+      L_Url := Copy(aURL, il + 1, Length(aURL) - il);
+      break;
+    end;
+    Inc(il);
+  end;
+  il := Length(L_Url);
+  if il = Low(L_Url) then
+    exit;
+  while il >= Low(L_Url) do
+  begin
+    if L_Url[il] in ['.'] then
+    begin
+      LwS := Copy(L_Url, Low(L_Url), il - 1);
+      if il < Length(L_Url) then
+        Lext := Lowercase(Copy(L_Url, il + 1, Length(L_Url) - il));
+      break;
+    end;
+    il := il - 1;
+  end;
+  if (LwS = '') or (Lext = '') then
+    exit;
+  il := Length(LwS);
+  while il >= Low(LwS) do
+  begin
+    if LwS[il] in ['/', '\'] then
+      break
+    else
+      LwRes := Concat(LwS[il], LwRes);
+    il := il - 1;
+  end;
+  ///
+  if LwRes = '' then
+    exit;
+  aExt := Lext;
+  aResName := LwRes;
+  result := true;
+end;
+
+function w_OnLoadData(pns: PSCN_LOAD_DATA): UINT;
+var
+  il:integer;
+  url, ps: widestring;
+  uri: widestring;
+  ext: widestring;
+  ResName: widestring;
+  extdeliPos: Integer;
+  bytes: TBytes;
+ // L_DataStream:TStream;
+  L_FoundDataFlag:boolean;
+begin
+  url := pns.uri;
+  il:=Pos(':',url);
+  /// старый случай для файлового пути - при этом sciter не добавляет протокол перед url
+  if (il<=2) then
+   begin
+     url:=Concat(protocol,Copy(url,il+1,Length(url)-il));
+   end;
+  ///
+  il:=Pos(':',url);
+  Assert(il>0,'Error in w_OnLoadData -> url='+url);
+  ps := Copy(url, 1,il-1);
+  //
+  uri := Copy(url,il+11, Length(url)-7);
+ { extdeliPos := pos('.', uri);
+  ResName := Copy(uri, 1, extdeliPos - 1);
+  ext := (Copy(uri, extdeliPos + 1, Length(uri)));
+  }
+  ///
+  ///
+  { if (SC_h1ResPath<>'') and (ps='file') then
+    begin
+    if ExtractFilePath(uri)='' then
+    uri:=Concat(SC_h1ResPath,uri);
+    end;
+  }
+  ///  source - url - in function!
+  if (ps <> 'app') then
+   begin
+    if w_ExtractResName(url, ResName, ext) = false then
+     begin
+       MessageDlg(Concat('Error in resource: ', url, #13#10,
+        'resname or ext is Empty!'), mtError, [mbOk], 0);
+     end;
+     if not(
+        (Pos('/',ResName)=0) and (Pos('\',ResName)=0) and (Pos('.',ResName)=0)) then
+      begin
+        MessageDlg(
+          'Invalid resource name:' + ' name=' + ResName + ' type=' + ext, mtError, [mbOk], 0
+         );
+       exit;
+      end;
+   end;
+  ///
+  if ps = protocol then begin
+     il:=0;
+    { if (ext = 'html') or (ext = 'htm') then
+       try
+        pns.outData:=GetResourceAsPointer(
+          PWideChar(ResName), RT_HTML, pns.outDataSize
+        );
+         except
+          il:=-1;
+          if err_loadInformRegime=1 then
+          MessageDlg(
+            'Not found HTML_RES:' + ' name=' + ResName + ' : type=' + ext, mtError, [mbOk], 0
+          );
+            end
+        else
+        }
+        begin
+          try
+            pns.outData:=GetResourceAsPointer(
+              PWideChar(ResName), PWideChar(ext), pns.outDataSize
+            );
+          except
+            il:=-2;
+             if err_loadInformRegime=1 then
+            MessageDlg(
+              'Not found RES:' + ' name=' + ResName + ' : type=' + ext, mtError, [mbOk], 0
+            );
+          end;
+        end;
+
+    if (pns.outData=nil) and (il>=0) then
+     begin
+       if err_loadInformRegime=1 then
+        MessageDlg(
+          'Not found ResourceData RES:' + ' name=' + ResName + ' : type=' + ext, mtError, [mbOk], 0
+        );
+     end;
+    //
+    if (pns.outData<>nil) and (pns.outDataSize <> 0) then
+      result := LOAD_OK
+    else
+      result := LOAD_DISCARD;
+    Exit;
+  end;
+
+  result := LOAD_OK; // proceed with the default loader.
+  //
+  //
+  if (result <> LOAD_OK) and (result <> LOAD_DISCARD) then
+  begin
+    MessageDlg('Error in Load Res - Result=' + IntToStr(result), mtError,
+      [mbOk], 0);
+  end;
+end;
+
+
 
 function BasicHostCallback(pns: Pointer; callbackParam: Pointer): UINT; stdcall;
 var
@@ -514,7 +742,7 @@ begin
   case p.cbhead.code of
     SC_LOAD_DATA:
       begin
-        result := 0;//OnLoadData (p);
+        result :=w_OnLoadData(p); // 0;   //OnLoadData (p);
         exit;
       end;
       SC_ENGINE_DESTROYED:
@@ -657,6 +885,7 @@ begin
 {$endif}
 end;
 
+{
 function GetResourceAsPointer(ResName: pchar; ResType: pchar; out Size: longword): pointer;
 var
   InfoBlock: HRSRC;
@@ -671,6 +900,7 @@ begin
   Result := LockResource(GlobalMemoryBlock);
   if Result = nil then  raise Exception.Create(SysErrorMessage(GetLastError));
 end;
+ }
 
 
 initialization

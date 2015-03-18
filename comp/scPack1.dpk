@@ -35,8 +35,7 @@ contains
   scComp in 'scComp.pas',
   sc_agent in '..\sc_agent.pas',
   sc_handler in '..\sc_handler.pas',
-  Sciter in '..\Sciter.pas',
-  SciterClass in '..\SciterClass.pas',
-  SciterTypes in '..\SciterTypes.pas';
+  SciterTypes in '..\SciterTypes.pas',
+  Sciter in '..\Sciter.pas';
 
 end.
