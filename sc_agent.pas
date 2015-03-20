@@ -68,6 +68,8 @@ type
  TAgentFailureEvent=procedure(const aPlace:string; aUID:Cardinal; aErrIndex:integer; const aData:String) of object;
 
 ///
+///
+///
 ///  Тип внешнего обработчик Callback:
 ///
 ///  hPval - указатель на Helement   hUid-UID элемента - остальное см el_Proc параметры
@@ -80,8 +82,15 @@ type
 ///  для скрипта
  TscScryptHandlerEvent=procedure(const aName:string; aData:Variant; var HRes:boolean) of Object;
 ///
+TscVersion=record
+      verNum,verSubNum,relNum,relSubNum:integer;
+      defFlag:boolean;
+      c_str:string[255];
+end;
+///
  TscAgent=class(TObject)  // Singleton
    protected
+    sc_Ver:TscVersion;
     fHwnd:Hwnd;
     FFileName:String;
     FVisible:boolean;
@@ -135,6 +144,7 @@ type
    function LoadDataFromStream(aDataType:integer; const AStream:TStream; const aURl:string; aUrlFormatSign:integer=0):boolean;
    // analog absolute
    function LoadDataFromMemStream(aDataType:integer; const AMStream:TMemoryStream; const aURl:string; aUrlFormatSign:integer=0):boolean;
+   function LoadDataFromFile(aDataType:integer; const aFilename,aUrl:string; aUrlFormatSign:integer=0):boolean;
    ///
    ///  загрузить из ресурсов - идентификатор ресурса - это имя файла (без расширения) - тип ресурса - это расширение файла
    function LoadDataFromRes(aDataType:integer; const aURl:string; aUrlFormatSign:integer=0):boolean;
@@ -296,6 +306,8 @@ type
    procedure Run;
    procedure ProcessMessages(iTime: Cardinal = 0);
    ///
+   ///  заполнить поля для версии скайтера (1 раз)
+   function FillVersionData:string;
    ///
    function Show(asyncFlag:boolean=false):boolean;
    function exec(const cmd: string):boolean;
@@ -480,6 +492,19 @@ var il:integer;
    Result:=(il=0);
  end;
 
+ function TscAgent.LoadDataFromFile(aDataType:integer; const aFilename,aUrl:string;  aUrlFormatSign:integer=0):boolean;
+ var LStream:TStream;
+  begin
+     Result:=false;
+    LStream:=TFileStream.Create(aFilename,fmOpenRead);
+    try
+     LStream.Seek(0,0);
+     Result:=LoadDataFromStream(aDataType,LStream,aURl,aUrlFormatSign);
+    finally
+      LStream.Free;
+    end;
+  end;
+
  function _ExtractFilename(const aUrl:String):string;
  var LS:String;
      i:integer;
@@ -601,6 +626,7 @@ function TscAgent.SetCallbackRegime(aCBRegime:integer):boolean;
    case aCBRegime of
    0: ISciter.SciterSetCallback(fHwnd,nil,nil);
    1: begin
+       // ресурсный подход с обработчиком
        SetBHProtocol(1);
        ISciter.SciterSetCallback(fHwnd,@BasicHostCallback,nil);
       end;
@@ -1911,6 +1937,22 @@ begin
       end;
     end;
 end;
+
+function TscAgent.FillVersionData:string;
+var aVer,aRel:integer;
+ begin
+   aVer:=GetVersion(true);
+   aRel:=GetVersion(false);
+   sc_Ver.verNum:=aVer shr 16;
+   sc_Ver.verSubNum:=(aVer shl 16) shr 16;
+   sc_Ver.relNum:=aRel shr 16;
+   sc_Ver.relSubNum:=(aRel shl 16) shr 16;
+   sc_Ver.defFlag:=(sc_Ver.verNum>0);
+   with sc_Ver do
+      c_str:=Concat(IntToStr(verNum),'.',IntToStr(verSubNum),'.',IntToStr(relNum),'.',IntToStr(relSubNum));
+   Result:=sc_Ver.c_str;
+  //  ShowMessage(sc_Ver.c_Str);
+ end;
 
 function TscAgent.Show(asyncFlag:boolean=false):boolean;
 begin
